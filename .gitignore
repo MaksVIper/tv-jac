@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+!.env.example
+logs/
+coverage/
+.vitest/
+*.log
+*.pid
+*.tmp
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

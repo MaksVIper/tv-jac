@@ -1,0 +1,245 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="csrf-token" content="<%= csrfToken %>">
+    <title><%= title %></title>
+    <style type="text/css" nonce="<%= cspNonce %>">
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            color: #00cd59;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+        }
+
+        .header {
+            display: block;
+            background-color: #00cd59;
+            color: #fff;
+            margin: 0;
+            padding: 12px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .container {
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .col {
+            width: 18%;
+            float: left;
+            margin-right: 2%;
+            background: #fff;
+        }
+
+        .col:last-child {
+            margin-right: 0;
+        }
+
+        .order {
+            margin-bottom: 10px;
+        }
+
+        .id {
+            font-size: 80px;
+            margin: 10px 0 10px 8px;
+            color: #00cd59;
+        }
+
+        .modal {
+            position: absolute;
+            left: 50%;
+            top: 30%;
+            margin-left: -200px;
+            background: #fff;
+            border: 2px solid #00cd59;
+            padding: 20px;
+            width: 400px;
+            text-align: center;
+            display: none;
+            z-index: 1000;
+        }
+
+        .modal.show {
+            display: block;
+        }
+
+        .modal-body {
+            font-size: 180px;
+        }
+
+        .sound-hint {
+            position: absolute;
+            left: 40%;
+            top: 35%;
+            font-size: 400px;
+        }
+
+        .btn {
+            background: red;
+            color: #fff;
+            padding: 40px;
+            font-size: 108px;
+            cursor: pointer;
+        }
+
+        .clear {
+            clear: both;
+        }
+    </style>
+</head>
+<body>
+<a href="/border" class="header">Готовые</a>
+<div class="container" id="cols"><div class="clear"></div></div>
+<div class="modal" id="modal"><div id="modalBody" class="modal-body"></div></div>
+<div class="sound-hint" id="soundHint">
+    <button class="btn" id="enableSoundBtn" type="button" tabindex="0">START</button>
+</div>
+<audio id="ding" preload="auto">
+    <source src="/public/audio/ding.mp3" type="audio/mp3">
+</audio>
+
+<script type="text/javascript" nonce="<%= cspNonce %>">
+    (function () {
+        var POINT_ID = <%= pointId %>;
+        var POLL_MS = 8000;
+        var MODAL_MS = 5000;
+        var lastHotId = null;
+        var soundEnabled = false;
+        var currentOrders = [];
+        var pollInterval = null;
+        var orderTimestamps = {};
+        var displayedOrdersStatus4 = [];
+
+        var ding = document.getElementById('ding');
+        var modal = document.getElementById('modal');
+        var modalBody = document.getElementById('modalBody');
+        var enableSoundBtn = document.getElementById('enableSoundBtn');
+        var soundHint = document.getElementById('soundHint');
+        var colsContainer = document.getElementById('cols');
+        colsContainer.style.display = 'none';
+
+        function getCsrfToken() {
+            var metaTag = document.querySelector('meta[name="csrf-token"]');
+            return metaTag ? metaTag.getAttribute('content') : '';
+        }
+
+        function enableSystem() {
+            if (soundEnabled) return;
+            soundEnabled = true;
+            try {
+                ding.play();
+                ding.pause();
+                ding.currentTime = 0;
+            } catch (e) {}
+            soundHint.style.display = 'none';
+            colsContainer.style.display = 'block';
+            tick();
+            pollInterval = setInterval(tick, POLL_MS);
+        }
+
+        function xhrPost(url, data, ok, fail) {
+            var x = new XMLHttpRequest();
+            x.open('POST', url, true);
+            x.setRequestHeader('X-CSRF-TOKEN', getCsrfToken());
+            x.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            x.setRequestHeader('Content-Type', 'application/json');
+            x.onreadystatechange = function () {
+                if (x.readyState !== 4) return;
+                if (x.status >= 200 && x.status < 300) {
+                    try { ok(JSON.parse(x.responseText)); } catch (e) { if (fail) fail(e); }
+                } else if (fail) {
+                    fail(x.status);
+                }
+            };
+            x.send(JSON.stringify(data));
+        }
+
+        function distributeOrders(orders) {
+            colsContainer.innerHTML = '<div class="clear"></div>';
+            var ordersPerColumn = 5;
+            var numColumns = Math.ceil(orders.length / ordersPerColumn);
+            for (var colIndex = 0; colIndex < numColumns; colIndex++) {
+                var col = document.createElement('div');
+                col.className = 'col';
+                colsContainer.insertBefore(col, colsContainer.lastChild);
+                var endIndex = Math.min((colIndex + 1) * ordersPerColumn, orders.length);
+                for (var i = colIndex * ordersPerColumn; i < endIndex; i++) {
+                    var orderDiv = document.createElement('div');
+                    orderDiv.className = 'order';
+                    orderDiv.setAttribute('data-order-id', orders[i].id);
+                    var idHeader = document.createElement('h2');
+                    idHeader.className = 'id';
+                    idHeader.appendChild(document.createTextNode(orders[i].id));
+                    orderDiv.appendChild(idHeader);
+                    col.appendChild(orderDiv);
+                }
+            }
+        }
+
+        function showHot(order) {
+            modalBody.textContent = order.id;
+            modal.className = 'modal show';
+            if (soundEnabled) {
+                try {
+                    ding.currentTime = 0;
+                    ding.play();
+                } catch (e) {}
+            }
+            setTimeout(function () { modal.className = 'modal'; }, MODAL_MS);
+        }
+
+        function tick() {
+            if (!soundEnabled) return;
+            xhrPost('/border_get_orders', {
+                point_id: POINT_ID,
+                orders: currentOrders,
+                displayed_orders: displayedOrdersStatus4,
+                order_timestamps: orderTimestamps
+            }, function (json) {
+                if (json && json.ready) {
+                    orderTimestamps = json.order_timestamps || {};
+                    var shown = json.displayed_status_4 || [];
+                    for (var i = 0; i < shown.length; i++) {
+                        if (displayedOrdersStatus4.indexOf(shown[i]) === -1) {
+                            displayedOrdersStatus4.push(shown[i]);
+                        }
+                    }
+                    currentOrders = [];
+                    for (var j = 0; j < json.ready.length; j++) currentOrders.push(json.ready[j].id);
+                    distributeOrders(json.ready);
+                }
+                if (json && json.hot) {
+                    for (var k = 0; k < json.hot.length; k++) {
+                        if (lastHotId !== json.hot[k].id) {
+                            lastHotId = json.hot[k].id;
+                            showHot(json.hot[k]);
+                        }
+                    }
+                }
+            }, function () {});
+        }
+
+        enableSoundBtn.onclick = enableSystem;
+        enableSoundBtn.onkeydown = function (event) {
+            if (event.keyCode === 13 || event.keyCode === 32) {
+                event.preventDefault();
+                enableSystem();
+            }
+        };
+        window.onbeforeunload = function () {
+            if (pollInterval) clearInterval(pollInterval);
+        };
+    })();
+</script>
+</body>
+</html>
